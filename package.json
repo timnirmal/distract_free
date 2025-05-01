@@ -1,0 +1,22 @@
+{
+  "name": "distract_free",
+  "version": "1.0.0",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "electron": "^36.0.1",
+    "electron-builder": "^26.0.12"
+  },
+  "dependencies": {
+    "active-win": "^8.2.1",
+    "openai": "^4.96.2",
+    "screenshot-desktop": "^1.15.1"
+  }
+}
