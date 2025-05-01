@@ -3,83 +3,127 @@
 <head>
   <meta charset="UTF-8">
   <title>Distraction Free</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    /* ... your existing styles ... */
-    #controls { margin-top:10px; }
+    body { margin:0; font-family:sans-serif; display:flex; height:100vh; }
+    #sidebar {
+      width:200px; background:#2c3e50; color:#ecf0f1;
+      padding:20px; box-sizing:border-box;
+    }
+    #sidebar h2 { margin-top:0; font-size:18px; }
+    #sidebar button { width:100%; margin:10px 0; padding:10px; }
+    #main {
+      flex:1; padding:20px; overflow-y:auto;
+      background:#ecf0f1; box-sizing:border-box;
+    }
+    #status { padding:10px; background:#e8f5e9; border-radius:4px; }
+    #chart-container { width:300px; margin:20px auto; }
+    #history { margin-top:30px; max-height:300px; overflow-y:auto; }
+    .entry { padding:5px 0; border-bottom:1px solid #bdc3c7; }
   </style>
 </head>
 <body>
-  <div class="container">
+  <div id="sidebar">
+    <h2>Controls</h2>
+    <button id="togglePause">⏸ Pause</button>
+    <h2>Session</h2>
+    <div id="sessionTime">…</div>
+  </div>
+  <div id="main">
     <h1>Distraction Free</h1>
-    <!-- Controls -->
-    <div id="controls">
-      <button id="togglePause">…</button>
-    </div>
-
     <div id="status">Loading…</div>
-
-    <h2>Distraction History</h2>
+    <div id="chart-container">
+      <canvas id="focusChart"></canvas>
+    </div>
+    <h2>History</h2>
     <button id="refresh">Refresh History</button>
     <div id="history">No records yet.</div>
   </div>
 
   <script>
     const { ipcRenderer } = require('electron');
-    const toggleBtn = document.getElementById('togglePause');
-    const statusDiv = document.getElementById('status');
-    const historyDiv= document.getElementById('history');
-    const refreshBtn= document.getElementById('refresh');
+    const toggleBtn  = document.getElementById('togglePause');
+    const statusDiv  = document.getElementById('status');
+    const sessDiv    = document.getElementById('sessionTime');
+    const historyDiv = document.getElementById('history');
+    const refreshBtn = document.getElementById('refresh');
 
-    // Update button text based on paused state
-    function setPausedUI(paused) {
-      toggleBtn.innerText = paused ? '▶️ Resume' : '⏸️ Pause';
-      statusDiv.innerText = paused
-        ? '⏸️ Detection Paused'
-        : '✔️ Detection Active';
-      statusDiv.style.background = paused ? '#ffe0b2' : '#e8f5e9';
+    let sessionStart = Date.now();
+    let chart, focusTime=0, distrTime=0;
+
+    function initChart(){
+      const ctx = document.getElementById('focusChart').getContext('2d');
+      chart = new Chart(ctx, {
+        type:'doughnut',
+        data:{labels:['Focus','Distraction'],datasets:[{data:[1,1],backgroundColor:['#27ae60','#c0392b']}]},
+        options:{responsive:true, maintainAspectRatio:false, cutout:'70%'}
+      });
     }
 
-    // On load, ask main for current state
-    ipcRenderer.invoke('get-paused-state').then(setPausedUI);
+    function updateChart(){
+      chart.data.datasets[0].data = [focusTime,distrTime];
+      chart.update();
+    }
 
-    // Listen for changes
-    ipcRenderer.on('paused-state', (_, paused) => setPausedUI(paused));
+    function updateSessionTime(){
+      const elapsed = Date.now() - sessionStart;
+      const mins = Math.floor(elapsed/60000).toString().padStart(2,'0');
+      const secs = Math.floor((elapsed%60000)/1000).toString().padStart(2,'0');
+      sessDiv.innerText = `${mins}:${secs} (hh:mm since start)`;
+    }
 
-    // Toggle on button click
-    toggleBtn.onclick = () => {
-      ipcRenderer.send('toggle-pause');
-    };
-
-    // Status updates for window classification
-    ipcRenderer.on('status-update', (_, data) => {
-      if (!data) return;
-      statusDiv.innerText = `${data.classification.toUpperCase()}: ${data.process} — ${data.title}`;
-      statusDiv.style.background =
-        data.classification==='distraction' ? '#ffcdd2' : '#e8f5e9';
+    // load initial session start
+    ipcRenderer.on('session-start',(_,ts)=>{
+      sessionStart = ts;
     });
 
-    // History handling
-    ipcRenderer.on('distraction-recorded', (_, rec) => prependEntry(rec));
-    async function loadHistory() {
+    // toggle pause/resume
+    toggleBtn.onclick = ()=>{
+      ipcRenderer.send('toggle-pause');
+    };
+    ipcRenderer.invoke('get-paused-state').then(paused=>{
+      toggleBtn.innerText = paused?'▶ Resume':'⏸ Pause';
+    });
+    ipcRenderer.on('paused-state',(_,p)=>{
+      toggleBtn.innerText = p?'▶ Resume':'⏸ Pause';
+      statusDiv.innerText = p?'Paused':'Active';
+      statusDiv.style.background = p?'#f9e79f':'#e8f5e9';
+    });
+
+    // status updates
+    ipcRenderer.on('status-update',(_,d)=>{
+      statusDiv.innerHTML = `<strong>${d.classification.toUpperCase()}</strong>: ${d.process} — ${d.title}`;
+      statusDiv.style.background = d.classification==='distraction'? '#f5b7b1':'#a9dfbf';
+    });
+
+    // history & chart data
+    async function loadHistory(){
       const list = await ipcRenderer.invoke('get-distraction-history');
-      historyDiv.innerHTML = '';
-      if (!list.length) return historyDiv.innerText='No records yet.';
-      list.forEach(r=>prependEntry(r,false));
+      historyDiv.innerHTML='';
+      distrTime = list.reduce((sum,r)=>sum + r.duration, 0);
+      const elapsed = Date.now() - sessionStart;
+      focusTime = Math.max(elapsed - distrTime, 0);
+      updateChart();
+
+      if(!list.length) return historyDiv.innerText='No records yet.';
+      list.forEach(r=>{
+        const el = document.createElement('div');
+        el.className='entry';
+        const t = new Date(r.start).toLocaleTimeString();
+        el.innerText = `${t} • ${r.process} — "${r.title}" (${Math.round(r.duration/1000)}s)`;
+        historyDiv.appendChild(el);
+      });
     }
     refreshBtn.onclick = loadHistory;
 
-    function prependEntry({process,title,start,duration}, scroll=true){
-      const el = document.createElement('div');
-      el.className='entry';
-      const t=new Date(start).toLocaleTimeString();
-      el.innerText=`${t} • ${process} — "${title}" (${Math.round(duration/1000)}s)`;
-      historyDiv.prepend(el);
-      if(scroll) historyDiv.scrollTop=0;
-    }
+    // screenshot analysis (optional UI update)
+    ipcRenderer.on('screenshot-analysis',(_,o)=> console.log('Analysis:',o.text));
 
+    // init
     document.addEventListener('DOMContentLoaded',()=>{
-      setPausedUI(false);
+      initChart();
       loadHistory();
+      setInterval(updateSessionTime,1000);
     });
   </script>
 </body>
