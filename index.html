@@ -4,7 +4,53 @@
   <meta charset="UTF-8">
   <title>Distraction Free</title>
   <style>
-    /* ... your existing styles ... */
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5; margin: 0; padding: 20px;
+    }
+    .container {
+      background: #fff; max-width: 800px; margin: auto;
+      padding: 20px; border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    #status {
+      margin-top: 20px; padding: 15px;
+      border-radius: 4px; background: #e8f5e9;
+      transition: background 0.3s;
+    }
+    #history {
+      margin-top: 30px; padding: 10px;
+      background: #fafafa; border-radius: 4px;
+      max-height: 200px; overflow-y: auto;
+    }
+    .entry {
+      padding: 5px 0; border-bottom: 1px solid #ddd;
+    }
+
+    /* Toast styles */
+    #toast-container {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 9999;
+    }
+    .toast {
+      background: rgba(0,0,0,0.85);
+      color: #fff;
+      padding: 10px 14px;
+      margin-top: 10px;
+      border-radius: 4px;
+      font-size: 14px;
+      line-height: 1.4;
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      pointer-events: none;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
   </style>
 </head>
 <body>
@@ -16,29 +62,44 @@
     <div id="history">No records yet.</div>
   </div>
 
+  <!-- Toast container -->
+  <div id="toast-container"></div>
+
   <script>
     const { ipcRenderer } = require('electron');
     const statusDiv  = document.getElementById('status');
     const historyDiv = document.getElementById('history');
     const refreshBtn = document.getElementById('refresh');
 
+    console.log('🖥️  Renderer loaded, setting up IPC listeners');
+
     ipcRenderer.on('status-update', (_, data) => {
+      console.log('🔄 status-update', data);
       statusDiv.innerText = `${data.classification.toUpperCase()}: ${data.process} — ${data.title}`;
       statusDiv.style.background =
         data.classification === 'distraction' ? '#ffcdd2' : '#e8f5e9';
     });
 
     ipcRenderer.on('screenshot-analysis', (_, { text }) => {
+      console.log('🖼️ screenshot-analysis', text);
       statusDiv.innerText = `📸 ${text.split('\n')[0]}`;
       statusDiv.style.background = '#FFF9C4';
     });
 
     ipcRenderer.on('distraction-recorded', (_, rec) => {
+      console.log('🗂️ distraction-recorded', rec);
       prependEntry(rec);
     });
 
+    ipcRenderer.on('pop-toast', (_, html) => {
+      console.log('▶️ pop-toast event', html);
+      showToast(html);
+    });
+
     async function loadHistory() {
+      console.log('🔄 Invoking get-distraction-history');
       const list = await ipcRenderer.invoke('get-distraction-history');
+      console.log('📋 History received', list);
       historyDiv.innerHTML = '';
       if (!list.length) {
         historyDiv.innerText = 'No records yet.';
@@ -56,8 +117,28 @@
       if (scroll) historyDiv.scrollTop = 0;
     }
 
+    // Toast logic
+    function showToast(html, duration = 5000) {
+      console.log('🎉 showToast', html);
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.innerHTML = html;
+      container.appendChild(toast);
+
+      requestAnimationFrame(() => toast.classList.add('show'));
+
+      setTimeout(() => {
+        toast.classList.remove('show');
+        toast.addEventListener('transitionend', () => container.removeChild(toast));
+      }, duration);
+    }
+
     refreshBtn.onclick = loadHistory;
-    document.addEventListener('DOMContentLoaded', loadHistory);
+    document.addEventListener('DOMContentLoaded', () => {
+      console.log('📦 DOMContentLoaded');
+      loadHistory();
+    });
   </script>
 </body>
 </html>
